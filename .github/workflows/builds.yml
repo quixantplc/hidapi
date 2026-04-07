@@ -319,6 +319,47 @@ jobs:
         cd build_meson
         ninja
 
+    - name: Configure CMake MSVC Static
+      shell: cmd
+      run: |
+        cmake -B build\msvc_static -S hidapisrc -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=FALSE -DCMAKE_INSTALL_PREFIX=install\msvc_static "-DCMAKE_C_FLAGS=%MSVC_COMPILE_FLAGS%"
+    - name: Build CMake MSVC Static
+      working-directory: build\msvc_static
+      run: cmake --build . --config Release --target install
+    - name: Check artifacts CMake MSVC Static
+      uses: andstor/file-existence-action@v2
+      with:
+        files: "install/msvc_static/lib/hidapi.lib, \
+                install/msvc_static/include/hidapi/hidapi.h, \
+                install/msvc_static/include/hidapi/hidapi_winapi.h"
+        fail: true
+    - name: Check CMake MSVC Static Export Package
+      shell: cmd
+      run: |
+        cmake ^
+          -B build\msvc_static_test ^
+          -S hidapisrc\hidtest ^
+          -Dhidapi_ROOT=install\msvc_static ^
+          -DCMAKE_INSTALL_PREFIX=install\msvc_static_test ^
+          "-DCMAKE_C_FLAGS=%MSVC_COMPILE_FLAGS%"
+        cd build\msvc_static_test
+        cmake --build . --target install
+    - name: Gather artifacts
+      run: |
+        md artifacts
+        md artifacts\x64
+        md artifacts\x64-static
+        md artifacts\include
+        Copy-Item "install\msvc\bin\hidapi.dll","install\msvc\lib\hidapi.lib" -Destination "artifacts\x64"
+        Copy-Item "install\msvc_static\lib\hidapi.lib" -Destination "artifacts\x64-static"
+        Copy-Item "install\msvc\include\hidapi\hidapi.h","install\msvc\include\hidapi\hidapi_winapi.h" -Destination "artifacts\include"
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: hidapi-win
+        path: artifacts/
+        retention-days: ${{ (github.event_name == 'pull_request' || github.ref_name != 'master') && 7 || 90 }}
+
 
   windows-msbuild:
 

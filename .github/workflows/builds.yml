@@ -341,14 +341,32 @@ jobs:
       with:
         files: "windows/x64/Release/hidapi.dll, windows/x64/Release/hidapi.lib, windows/x64/Release/hidapi.pdb"
         fail: true
+    - name: MSBuild x86 MSVC Static
+      run: msbuild windows\hidapi.sln /p:Configuration=Release-Static /p:Platform=Win32
+    - name: Check artifacts x86 static
+      uses: andstor/file-existence-action@v2
+      with:
+        files: "windows/Release-Static/hidapi.lib"
+        fail: true
+    - name: MSBuild x64 MSVC Static
+      run: msbuild windows\hidapi.sln /p:Configuration=Release-Static /p:Platform=x64
+    - name: Check artifacts x64 static
+      uses: andstor/file-existence-action@v2
+      with:
+        files: "windows/x64/Release-Static/hidapi.lib"
+        fail: true
     - name: Gather artifacts
       run: |
         md artifacts
         md artifacts\x86
         md artifacts\x64
+        md artifacts\x86-static
+        md artifacts\x64-static
         md artifacts\include
         Copy-Item "windows\Release\hidapi.dll","windows\Release\hidapi.lib","windows\Release\hidapi.pdb" -Destination "artifacts\x86"
         Copy-Item "windows\x64\Release\hidapi.dll","windows\x64\Release\hidapi.lib","windows\x64\Release\hidapi.pdb" -Destination "artifacts\x64"
+        Copy-Item "windows\Release-Static\hidapi.lib" -Destination "artifacts\x86-static"
+        Copy-Item "windows\x64\Release-Static\hidapi.lib" -Destination "artifacts\x64-static"
         Copy-Item "hidapi\hidapi.h","windows\hidapi_winapi.h" -Destination "artifacts\include"
     - name: Upload artifacts
       uses: actions/upload-artifact@v4

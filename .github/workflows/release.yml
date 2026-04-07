@@ -1,0 +1,104 @@
+name: Release
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    types: [closed]
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  resolve-version:
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.merged == true }}
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.merge_commit_sha || github.sha }}
+
+      - name: Read VERSION file
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION_RAW="$(tr -d '\r\n[:space:]' < VERSION)"
+          if [[ -z "$VERSION_RAW" ]]; then
+            echo "VERSION file is empty"
+            exit 1
+          fi
+
+          # Accept numeric semver core (e.g. 0.16.0)
+          if [[ ! "$VERSION_RAW" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Invalid VERSION format: $VERSION_RAW"
+            echo "Expected format: X.Y.Z"
+            exit 1
+          fi
+
+          echo "version=$VERSION_RAW" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION_RAW" >> "$GITHUB_OUTPUT"
+
+  release:
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.merged == true }}
+    needs: resolve-version
+    runs-on: ubuntu-latest
+    concurrency:
+      group: release-${{ needs.resolve-version.outputs.tag }}
+      cancel-in-progress: false
+    steps:
+      - name: Checkout (full history for tags)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.merge_commit_sha || github.sha }}
+
+      - name: Ensure tag exists and points to this commit
+        id: tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="${{ needs.resolve-version.outputs.tag }}"
+          COMMIT_SHA="${{ github.event_name == 'pull_request' && github.event.pull_request.merge_commit_sha || github.sha }}"
+
+          git fetch --tags --force
+
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            TAG_SHA="$(git rev-list -n 1 "$TAG")"
+            if [[ "$TAG_SHA" != "$COMMIT_SHA" ]]; then
+              echo "Tag $TAG already exists and points to $TAG_SHA; skipping release for current commit $COMMIT_SHA."
+              echo "skip_release=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            echo "Tag $TAG already exists and is correct."
+            echo "skip_release=false" >> "$GITHUB_OUTPUT"
+          else
+            git tag "$TAG" "$COMMIT_SHA"
+            git push origin "$TAG"
+            echo "Created and pushed tag $TAG"
+            echo "skip_release=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create GitHub release if missing
+        if: ${{ steps.tag.outputs.skip_release != 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="${{ needs.resolve-version.outputs.tag }}"
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists. Skipping."
+            exit 0
+          fi
+
+          gh release create "$TAG" \
+            --title "$TAG" \
+            --generate-notes
